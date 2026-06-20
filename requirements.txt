@@ -1,0 +1,17 @@
+torch>=2.4.0
+torchvision>=0.19.0
+diffusers>=0.31.0
+transformers>=4.49.0
+tokenizers>=0.20.3
+safetensors>=0.4.2
+einops
+easydict
+ftfy
+tqdm
+imageio
+imageio-ffmpeg
+opencv-python>=4.9.0.80
+numpy>=1.23.5,<2
+decord
+# Optional but strongly recommended for speed; node falls back to SDPA if absent:
+# flash_attn

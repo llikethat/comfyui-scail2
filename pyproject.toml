@@ -1,0 +1,33 @@
+[project]
+name = "comfyui-scail2"
+description = "Faithful ComfyUI nodes for SCAIL-2 character animation, with long-video improvements."
+version = "0.1.0"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "torch>=2.4.0",
+    "torchvision>=0.19.0",
+    "diffusers>=0.31.0",
+    "transformers>=4.49.0",
+    "tokenizers>=0.20.3",
+    "safetensors>=0.4.2",
+    "einops",
+    "easydict",
+    "ftfy",
+    "tqdm",
+    "imageio",
+    "imageio-ffmpeg",
+    "opencv-python>=4.9.0.80",
+    "numpy>=1.23.5,<2",
+    "decord",
+]
+
+[project.urls]
+Repository = "https://github.com/your-org/ComfyUI-SCAIL2"
+Upstream = "https://github.com/zai-org/SCAIL-2"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-SCAIL2"
+Icon = ""
