@@ -506,7 +506,7 @@ class CLIPModel:
         self.model = self.model.eval().requires_grad_(False)
         logging.info(f'loading {checkpoint_path}')
         self.model.load_state_dict(
-            torch.load(checkpoint_path, map_location='cpu'))
+            torch.load(checkpoint_path, map_location='cpu'), strict=False)
 
     def visual(self, videos):
         # preprocess

@@ -26,27 +26,87 @@ pip install -r requirements.txt
 
 `flash_attn` is recommended but not required — the vendored `attention.py` falls back to PyTorch SDPA when flash_attn is missing.
 
-## Model files (standard ComfyUI layout)
+## Downloads
+
+All files listed below have been verified against the actual HuggingFace repos. Total disk: ~32 GB for the bf16 stack, less if you swap in quantized variants.
+
+| Component | File | Size | Destination |
+|-----------|------|------|-------------|
+| **DiT** (pre-converted, recommended) | [`wan2.1_14B_SCAIL_2_fp16.safetensors`](https://huggingface.co/Comfy-Org/SCAIL-2/resolve/main/wan2.1_14B_SCAIL_2_fp16.safetensors) | ~14 GB | `models/diffusion_models/` |
+| **VAE** | [`Wan2.1_VAE.pth`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/Wan2.1_VAE.pth) | ~250 MB | `models/vae/` |
+| **T5** umt5-xxl (bf16) | [`models_t5_umt5-xxl-enc-bf16.pth`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/umt5-xxl/models_t5_umt5-xxl-enc-bf16.pth) | 11.4 GB | `models/text_encoders/` |
+| **T5 tokenizer** (4 files) | [`spiece.model`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/umt5-xxl/spiece.model) · [`tokenizer.json`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/umt5-xxl/tokenizer.json) · [`tokenizer_config.json`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/umt5-xxl/tokenizer_config.json) · [`special_tokens_map.json`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/umt5-xxl/special_tokens_map.json) | ~22 MB | `models/scail2/tokenizers/umt5-xxl/` |
+| **CLIP vision** (visual-only) | [`models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth`](https://huggingface.co/zai-org/SCAIL-2/resolve/main/models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth) | 2.53 GB | `models/clip_vision/` |
+| **Lightx2v LoRA** (optional, step-distill) | [`Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors`](https://huggingface.co/lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v/resolve/main/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors) | ~300 MB | `models/loras/` |
+
+### One-shot download script
+
+Drop this into your ComfyUI root and run it. Uses the official `huggingface_hub` CLI (`pip install -U "huggingface_hub[cli]"`).
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+COMFY_ROOT="${COMFY_ROOT:-$(pwd)}"
+cd "$COMFY_ROOT"
+
+mkdir -p models/diffusion_models models/vae models/text_encoders \
+         models/clip_vision models/loras models/scail2/tokenizers/umt5-xxl
+
+# 1. DiT (pre-converted)
+hf download Comfy-Org/SCAIL-2 wan2.1_14B_SCAIL_2_fp16.safetensors \
+    --local-dir models/diffusion_models
+
+# 2. VAE + 3. T5 + 4. T5 tokenizer + 5. CLIP vision (all from zai-org/SCAIL-2)
+hf download zai-org/SCAIL-2 Wan2.1_VAE.pth \
+    --local-dir models/vae
+hf download zai-org/SCAIL-2 umt5-xxl/models_t5_umt5-xxl-enc-bf16.pth \
+    --local-dir models/text_encoders --local-dir-use-symlinks False
+mv models/text_encoders/umt5-xxl/models_t5_umt5-xxl-enc-bf16.pth models/text_encoders/
+rmdir models/text_encoders/umt5-xxl 2>/dev/null || true
+
+hf download zai-org/SCAIL-2 \
+    umt5-xxl/spiece.model umt5-xxl/tokenizer.json \
+    umt5-xxl/tokenizer_config.json umt5-xxl/special_tokens_map.json \
+    --local-dir models/scail2/tokenizers
+# Result: models/scail2/tokenizers/umt5-xxl/{spiece.model, ...}
+
+hf download zai-org/SCAIL-2 models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth \
+    --local-dir models/clip_vision
+
+# 6. Lightx2v LoRA (optional)
+hf download lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v \
+    loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors \
+    --local-dir models/loras --local-dir-use-symlinks False
+mv models/loras/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors models/loras/
+rmdir models/loras/loras 2>/dev/null || true
+
+echo "Done. Total downloaded: ~32 GB."
+```
+
+Resulting tree:
 
 ```
 ComfyUI/models/
-├── diffusion_models/
-│   └── SCAIL-2.safetensors                                           # converted DiT
-├── vae/
-│   └── Wan2.1_VAE.pth
-├── text_encoders/
-│   └── models_t5_umt5-xxl-enc-bf16.pth
-├── clip_vision/
-│   └── models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth
-├── loras/
-│   └── lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors   # optional
-└── scail2/
-    └── tokenizers/
-        ├── umt5-xxl/             # HF tokenizer directory (spiece.model + config files)
-        └── xlm-roberta-large/    # HF tokenizer directory
+├── diffusion_models/wan2.1_14B_SCAIL_2_fp16.safetensors
+├── vae/Wan2.1_VAE.pth
+├── text_encoders/models_t5_umt5-xxl-enc-bf16.pth
+├── clip_vision/models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth
+├── loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
+└── scail2/tokenizers/umt5-xxl/{spiece.model, tokenizer.json, tokenizer_config.json, special_tokens_map.json}
 ```
 
-Download from `hf download zai-org/SCAIL-2`, then run `convert.py` from the upstream repo to produce `SCAIL-2.safetensors`. The tokenizer subdirectories are inside the same HuggingFace download — copy them to `models/scail2/tokenizers/`.
+### Lower-VRAM variants (not yet supported by this pack)
+
+These exist if you can't fit the bf16 stack, but the loader needs additional work to handle them — flagged as roadmap, not v0.1:
+
+- **GGUF quantized DiT** — [`realrebelai/SCAIL-2_GGUF`](https://huggingface.co/realrebelai/SCAIL-2_GGUF) (Q2_K=6 GB ... Q8_0=17.7 GB). Requires loading via [`city96/ComfyUI-GGUF`](https://github.com/city96/ComfyUI-GGUF). Our `SCAIL2 Model Loader` does not currently route through it.
+- **fp8 T5** — [`Kijai/WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors`](https://huggingface.co/Kijai/WanVideo_comfy/blob/main/umt5-xxl-enc-fp8_e4m3fn.safetensors) (~5 GB vs 11.4 GB). Our T5 loader uses `torch.load` (.pth); supporting safetensors + fp8 needs a different key-mapping path.
+
+If you want either supported, open an issue.
+
+### Skipping the conversion step
+
+The official `zai-org/SCAIL-2` repo ships the DiT as an FSDP shard (`model/1/fsdp2_rank_0000_checkpoint.pt`) that requires running upstream's `convert.py` to produce a usable `.safetensors`. The `Comfy-Org/SCAIL-2` mirror linked above is exactly that conversion already done — drop it in and skip the step entirely.
 
 ## Nodes
 

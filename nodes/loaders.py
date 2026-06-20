@@ -197,11 +197,12 @@ class SCAIL2CLIPVisionLoader:
     def INPUT_TYPES(cls):
         ensure_dirs()
         clips = list_files("clip_vision", exts=(".pth", ".safetensors", ".bin"))
-        tokenizers = list_tokenizer_dirs() or ["xlm-roberta-large"]
+        tokenizers = ["(unused)"] + list_tokenizer_dirs()
         return {
             "required": {
                 "clip_name": (clips if clips else ["<place CLIP vision in models/clip_vision/>"],),
-                "tokenizer": (tokenizers, {"tooltip": "Tokenizer dir under models/scail2/tokenizers/"}),
+                "tokenizer": (tokenizers, {"default": "(unused)",
+                    "tooltip": "CLIPModel does not use the tokenizer — leave as '(unused)'. Field kept for forward compatibility."}),
                 "precision": (["fp16", "bf16", "fp32"], {"default": "fp16"}),
             }
         }
@@ -212,9 +213,8 @@ class SCAIL2CLIPVisionLoader:
         ckpt = resolve_model_path("clip_vision", clip_name)
         if ckpt is None or not os.path.isfile(ckpt):
             raise FileNotFoundError(f"CLIP vision not found: {clip_name}")
-        tok_dir = resolve_tokenizer_dir(tokenizer)
-        if not os.path.isdir(tok_dir):
-            raise FileNotFoundError(f"Tokenizer dir not found: {tok_dir}")
+        # CLIPModel stores tokenizer_path but never reads it — pass any string.
+        tok_dir = "" if tokenizer == "(unused)" else resolve_tokenizer_dir(tokenizer)
 
         dtype = _dtype_from_str(precision)
         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
