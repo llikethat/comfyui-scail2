@@ -128,7 +128,8 @@ class SCAIL2Sampler:
                 "history_as_latent": ("BOOLEAN", {"default": True,
                     "tooltip": "Keep history as latent across segments (no VAE round-trip drift)."}),
 
-                "offload_model":    ("BOOLEAN", {"default": True}),
+                "offload_model":    ("BOOLEAN", {"default": True,
+                    "tooltip": "Cycle DiT between GPU and CPU between segments to free VRAM for VAE decode. DiT is always moved to GPU for sampling regardless."}),
                 "quick_preview":    ("BOOLEAN", {"default": False,
                     "tooltip": "Run only the first segment for fast prompt iteration."}),
                 "quick_preview_steps": ("INT", {"default": 8, "min": 1, "max": 40,
@@ -164,6 +165,17 @@ class SCAIL2Sampler:
         vae_obj = vae["vae"]
         clip_obj = clip_vision["clip"]
 
+        # Aggressive cleanup at sampler entry. Prior failed runs in the same
+        # ComfyUI session can leave model fragments on GPU that ComfyUI's
+        # model_management does not know about (custom-node objects). Force
+        # collection + empty_cache before claiming we have a clean baseline.
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+            total_gb = torch.cuda.mem_get_info()[1] / (1024 ** 3)
+            log.info("GPU memory at sampler entry: %.2f / %.2f GB free", free_gb, total_gb)
+
         if quick_preview:
             steps = min(steps, quick_preview_steps)
             log.info("Quick-preview: forcing steps=%d, single-segment only.", steps)
@@ -189,17 +201,34 @@ class SCAIL2Sampler:
         )  # (28, 1, h_lat, w_lat)
 
         # ------------------------------------------------------------------
-        # 2. Prepare pose + driving mask, with optional tail padding
+        # 2. Prepare pose + driving mask
+        #
+        # IMPORTANT: resize on CPU BEFORE uploading to GPU. At source resolution
+        # (e.g. 1080x1920 x 357 frames) these tensors can be 8-10 GB each at
+        # fp32. Resizing on CPU first cuts peak GPU usage by ~16 GB.
         # ------------------------------------------------------------------
-        pose = image_batch_to_tchw_minus1_1(pose_frames).to(device)                    # (T, 3, H, W) [-1, 1]
-        pose = F.interpolate(pose, size=(target_height, target_width),
-                             mode="bilinear", align_corners=False)
-        drv_mask_3thw = masks["driving_mask_3thw"].to(device)                          # (3, T, H, W) [-1, 1] raw
-        drv_mask_tchw = drv_mask_3thw.permute(1, 0, 2, 3)                              # (T, 3, H, W)
-        drv_mask_tchw = F.interpolate(drv_mask_tchw,
-                                      size=(target_height, target_width),
-                                      mode="nearest")                                  # NEAREST preserves color bins
-        drv_mask_3thw = drv_mask_tchw.permute(1, 0, 2, 3).contiguous()
+        pose_cpu = image_batch_to_tchw_minus1_1(pose_frames)                  # (T, 3, Hsrc, Wsrc) CPU
+        log.info("Pose CPU resize: (%d,%d,%d,%d) -> (%d,%d,%d,%d)",
+                 *pose_cpu.shape, pose_cpu.shape[0], 3, target_height, target_width)
+        pose_cpu = F.interpolate(pose_cpu, size=(target_height, target_width),
+                                 mode="bilinear", align_corners=False)
+        pose = pose_cpu.to(device)
+        del pose_cpu
+
+        drv_mask_cpu_3thw = masks["driving_mask_3thw"]                        # (3, T, Hsrc, Wsrc) CPU
+        drv_mask_cpu_tchw = drv_mask_cpu_3thw.permute(1, 0, 2, 3).contiguous()
+        log.info("Driving mask CPU resize: (%d,%d,%d,%d) -> (%d,%d,%d,%d)",
+                 *drv_mask_cpu_tchw.shape, drv_mask_cpu_tchw.shape[0], 3, target_height, target_width)
+        drv_mask_cpu_tchw = F.interpolate(drv_mask_cpu_tchw,
+                                          size=(target_height, target_width),
+                                          mode="nearest")                      # NEAREST preserves color bins
+        drv_mask_3thw = drv_mask_cpu_tchw.permute(1, 0, 2, 3).contiguous().to(device)
+        del drv_mask_cpu_tchw
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            free_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+            log.info("GPU memory after pose+mask upload: %.2f GB free", free_gb)
 
         T_orig = pose.shape[0]
         if drv_mask_3thw.shape[1] != T_orig:
@@ -299,9 +328,20 @@ class SCAIL2Sampler:
         # ------------------------------------------------------------------
         # 7. Segment loop
         # ------------------------------------------------------------------
-        # Move DiT to device
-        if offload_model:
-            dit.to(device)
+        # Always move DiT to GPU before sampling. The `offload_model` parameter
+        # ONLY controls whether to cycle the DiT off GPU between segments to
+        # make room for the VAE decode — it does not gate the initial placement.
+        # Previously this was conditional on offload_model, which left the DiT
+        # on CPU when the user disabled offloading, producing a
+        # "Input CUDABFloat16 / weight CPUBFloat16" error on the first forward.
+        dit.to(device)
+        # Sanity check that we actually landed on the right device.
+        _first_param = next(dit.parameters(), None)
+        if _first_param is not None and _first_param.device != device:
+            log.warning(
+                "DiT did not move to %s (still on %s). Forward pass will fail.",
+                device, _first_param.device,
+            )
 
         previews_per_segment = []
         output_segments = []

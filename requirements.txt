@@ -12,6 +12,8 @@ imageio
 imageio-ffmpeg
 opencv-python>=4.9.0.80
 numpy>=1.23.5,<2
-decord
+# Optional — only needed if you use upstream's load_video_for_pose_sample helper,
+# which the ComfyUI wrapper does not. Install if you want it:
+# decord
 # Optional but strongly recommended for speed; node falls back to SDPA if absent:
 # flash_attn

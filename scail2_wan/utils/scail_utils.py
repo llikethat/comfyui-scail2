@@ -1,7 +1,5 @@
 import os
-import decord
 import numpy as np
-from decord import VideoReader
 import torch
 import torch.nn.functional as F
 import logging
@@ -24,6 +22,10 @@ def load_image_to_tensor_chw_normalized(image: Image.Image):
     return image_tensor
 
 def load_video_for_pose_sample(video_data):
+    # Lazy import — only this function uses decord, and the ComfyUI wrapper
+    # never calls it. Users loading frames via VHS_LoadVideo don't need decord.
+    import decord
+    from decord import VideoReader
     decord.bridge.set_bridge("torch")
     vr = VideoReader(uri=video_data, height=-1, width=-1)
     indices = np.arange(0, len(vr))

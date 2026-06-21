@@ -9,8 +9,44 @@ Standard install layout:
     ComfyUI/models/text_encoders/      <- models_t5_umt5-xxl-enc-bf16.pth
     ComfyUI/models/clip_vision/        <- models_clip_open-clip-xlm-roberta-large-vit-huge-14-onlyvisual.pth
     ComfyUI/models/loras/              <- optional Lightx2v LoRA .safetensors
-    ComfyUI/models/scail2/tokenizers/  <- umt5-xxl/, xlm-roberta-large/ (HF tokenizer dirs)
+    ComfyUI/models/scail2/tokenizers/  <- umt5-xxl/ (HF tokenizer dir)
 """
+import logging
+import sys
+
+_log = logging.getLogger("ComfyUI-SCAIL2")
+
+# Startup dependency check. The CLIP/VAE/T5 loaders don't need diffusers, but
+# the DiT (SCAIL2Model) inherits from diffusers.ConfigMixin, so the sampler
+# cannot run without it. Surface this at pack load time so users don't discover
+# it mid-workflow.
+_missing = []
+for _pkg, _import_name in [
+    ("diffusers", "diffusers"),
+    ("einops", "einops"),
+    ("easydict", "easydict"),
+    ("ftfy", "ftfy"),
+    ("safetensors", "safetensors"),
+]:
+    try:
+        __import__(_import_name)
+    except ImportError:
+        _missing.append(_pkg)
+
+if _missing:
+    _msg = (
+        f"\n{'=' * 70}\n"
+        f"ComfyUI-SCAIL2: missing required packages: {', '.join(_missing)}\n"
+        f"From your ComfyUI Python environment, run:\n"
+        f"  pip install {' '.join(_missing)}\n"
+        f"or:\n"
+        f"  pip install -r custom_nodes/ComfyUI-SCAIL2/requirements.txt\n"
+        f"The nodes will register but the sampler will fail until these are installed.\n"
+        f"{'=' * 70}"
+    )
+    print(_msg, file=sys.stderr)
+    _log.warning(_msg)
+
 
 from .nodes.loaders import (
     SCAIL2ModelLoader,
