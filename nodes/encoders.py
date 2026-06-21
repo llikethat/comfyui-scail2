@@ -68,9 +68,18 @@ class SCAIL2EncodeText:
         if offload_after_encode:
             encoder.model.cpu()
             if torch.cuda.is_available():
+                # Sync first so all pending GPU work touching T5 is done,
+                # then empty_cache to release blocks back to CUDA. Without sync,
+                # the allocator can't release fragments that look "in flight".
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
             pos = [p.cpu() for p in pos]
             neg = [n.cpu() for n in neg]
+            # Drop our references to any GPU intermediates and force collection.
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return ({
             "positive": pos,

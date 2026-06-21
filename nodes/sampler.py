@@ -336,12 +336,16 @@ class SCAIL2Sampler:
         # "Input CUDABFloat16 / weight CPUBFloat16" error on the first forward.
         dit.to(device)
         # Sanity check that we actually landed on the right device.
+        # Normalize device strings so `cuda` matches `cuda:0` (both refer to GPU 0).
         _first_param = next(dit.parameters(), None)
-        if _first_param is not None and _first_param.device != device:
-            log.warning(
-                "DiT did not move to %s (still on %s). Forward pass will fail.",
-                device, _first_param.device,
-            )
+        if _first_param is not None:
+            _got = _first_param.device
+            _want = device
+            if _got.type != _want.type or (_got.index or 0) != (_want.index or 0):
+                log.warning(
+                    "DiT did not move to %s (still on %s). Forward pass will fail.",
+                    _want, _got,
+                )
 
         previews_per_segment = []
         output_segments = []
@@ -486,16 +490,24 @@ class SCAIL2Sampler:
                 else:
                     output_segments.append(decoded[:, segment_overlap:].cpu())
 
-                # Emit live preview to ComfyUI client
+                # Update segment-level progress for the ComfyUI UI.
+                #
+                # We deliberately do NOT pass `preview=...` here. Previously this
+                # function passed a torch.Tensor in the preview tuple, which
+                # crashed ComfyUI's async publish_loop with
+                # `AttributeError: 'Tensor' object has no attribute 'save'`,
+                # killing the entire workflow mid-run. Even with proper PIL
+                # conversion, format expectations differ across ComfyUI versions
+                # and any future mismatch would re-introduce the same fatal
+                # crash. The `debug_preview_grid` output gives the user
+                # per-segment thumbnails after the run completes — losing the
+                # *live* thumbnail is acceptable; losing a 45-minute generation
+                # is not.
                 if pbar is not None:
-                    # Use first frame of segment as a quick preview thumbnail
-                    thumb = decoded[:, 0].cpu().add(1).div(2).clamp(0, 1)  # (3,H,W)
-                    thumb = (thumb * 255).byte().permute(1, 2, 0).contiguous()   # H,W,3
                     try:
-                        pbar.update_absolute(seg_idx + 1, total=len(segments), preview=("PNG", thumb, None))
-                    except TypeError:
-                        # Older ComfyUI signatures: update_absolute(value)
-                        pbar.update_absolute(seg_idx + 1)
+                        pbar.update_absolute(seg_idx + 1, total=len(segments))
+                    except Exception as e:
+                        log.warning("Progress bar update failed (%s); continuing.", e)
 
                 # Move DiT back to GPU for the next segment if we offloaded
                 if offload_model and seg_idx < len(segments) - 1:
